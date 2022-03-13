@@ -1,3 +1,7 @@
+//输入2dConvolution的数据为(bs, 1, w, h, d)h为z轴
+//在2dConvolution中将axis1进行压缩，同时permute，输入给2dcon的数据的shape为(bs, h, w, d)
+//之后输入给3DSH再进行数据升维
+
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
@@ -32,7 +36,7 @@ class SegmentationHead(nn.Module):
 
     # Dimension exapension
     x_in = x_in[:, None, :, :, :]
-
+//在2dconv中将数据的z轴等同于2d图像数据的channel维度，这样就可以当成2d数据处理了，这样的话SH的input就是没有channel的空间结构
     # Convolution to go from inplanes to planes features...
     x_in = self.relu(self.conv0(x_in))
 
@@ -44,7 +48,8 @@ class SegmentationHead(nn.Module):
     x_in = self.conv_classes(x_in)
 
     return x_in
-
+//上述对输入的四维tensor进行不同dilation的空洞卷积，然后将结果直接相加，相加之后利用relu进行激活，在之后进行one-hot。
+//不同dilation的convolution的流程为conv3d,bn,activation,conv3d,bn。
 
 class LMSCNet(nn.Module):
 
@@ -57,6 +62,7 @@ class LMSCNet(nn.Module):
     super().__init__()
     self.nbr_classes = class_num
     self.input_dimensions = input_dimensions  # Grid dimensions should be (W, H, D).. z or height being axis 1
+    //但是这里明显是将H当作z
     self.class_frequencies = class_frequencies
     f = self.input_dimensions[1]
 
@@ -121,7 +127,8 @@ class LMSCNet(nn.Module):
 
     input = x['3D_OCCUPANCY']  # Input to LMSCNet model is 3D occupancy big scale (1:1) [bs, 1, W, H, D]
     input = torch.squeeze(input, dim=1).permute(0, 2, 1, 3)  # Reshaping to the right way for 2D convs [bs, H, W, D]
-
+  
+    
     # Encoder block
     _skip_1_1 = self.Encoder_block1(input)
     _skip_1_2 = self.Encoder_block2(_skip_1_1)
@@ -184,7 +191,8 @@ class LMSCNet(nn.Module):
     class_weights = self.get_class_weights().to(device=target.device, dtype=target.dtype)
 
     criterion = nn.CrossEntropyLoss(weight=class_weights, ignore_index=255, reduction='mean').to(device=device)
-
+    //估计是将两个other不考虑对于网络迭代的影响,也可能是因为采用的是CrossEntropy,255就相当于1？
+    //对于不同的类有不同的权重具体的权重为class_weights
     loss_1_1 = criterion(scores['pred_semantic_1_1'], data['3D_LABEL']['1_1'].long())
     loss_1_2 = criterion(scores['pred_semantic_1_2'], data['3D_LABEL']['1_2'].long())
     loss_1_4 = criterion(scores['pred_semantic_1_4'], data['3D_LABEL']['1_4'].long())
@@ -203,7 +211,8 @@ class LMSCNet(nn.Module):
     '''
     epsilon_w = 0.001  # eps to avoid zero division
     weights = torch.from_numpy(1 / np.log(self.class_frequencies + epsilon_w))
-
+    //出现越多的object所占的权重就越小
+    
     return weights
 
   def get_target(self, data):
